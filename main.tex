@@ -1,0 +1,103 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[polish]{babel}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows, positioning}
+\usepackage{geometry}
+\geometry{a4paper, margin=2cm}
+
+\tikzstyle{process} = [rectangle, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=orange!30]
+\tikzstyle{decision} = [diamond, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=green!30]
+\tikzstyle{io} = [trapezium, trapezium left angle=70, trapezium right angle=110, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=blue!30]
+\tikzstyle{arrow} = [thick,->,>=stealth]
+
+\title{Dokumentacja Projektu: Generowanie Zbioru Mandelbrota}
+\author{Emil Gruszecki \& Hanna Nużka}
+\date{\today}
+\begin{document}
+
+\maketitle
+
+\section{Cel i Budowa Programu}
+Celem projektu jest równoległe wygenerowanie fraktala (zbioru Mandelbrota) w środowisku rozproszonym. Program wykorzystuje model \textbf{Manager-Workers} przy użyciu biblioteki MPI (Message Passing Interface) do komunikacji między węzłami oraz OpenMP do akceleracji obliczeń na poszczególnych procesach (obliczanie pikseli w wierszu przez wiele wątków rdzenia).
+
+\section{Interfejs Użytkownika (UI)}
+Aby ułatwić obsługę programu i zapewnić przejrzystą informację zwrotną, aplikacja została wyposażona w tekstowy interfejs użytkownika (TUI). Za jego obsługę odpowiada wyłącznie główny proces zarządcy (\texttt{rank == 0}), co zapobiega powielaniu komunikatów na ekranie. Interfejs składa się z dwóch głównych elementów:
+
+\begin{itemize}
+    \item \textbf{Interaktywne Menu Konfiguracyjne:} Jeśli program zostanie uruchomiony bez podania pliku konfiguracyjnego w argumentach wywołania, użytkownik otrzymuje możliwość wyboru. Może wczytać domyślne parametry z pliku \texttt{config.txt} lub przejść do trybu ręcznego, wprowadzając z klawiatury wymiary obrazu, zakresy układu współrzędnych oraz maksymalną liczbę iteracji.
+    \item \textbf{Dynamiczny Pasek Postępu:} Generowanie fraktali w dużej rozdzielczości jest zadaniem złożonym obliczeniowo. Aby użytkownik mógł śledzić stan pracy klastra, Manager podczas odbierania gotowych wierszy od Workerów na bieżąco odświeża w terminalu graficzny pasek postępu wraz z ujętym procentowo stopniem zaawansowania obliczeń.
+\end{itemize}
+
+\section{Obsługa Programu}
+Aby skompilować i uruchomić program, przygotowano zestaw reguł w pliku \texttt{Makefile}:
+\begin{itemize}
+    \item \texttt{make} -- kompilacja kodu źródłowego przy użyciu kompilatora \texttt{mpicc} do pliku wykonywalnego.
+    \item \texttt{make run} -- uruchomienie programu (np. na 4 procesach przy użyciu \texttt{mpiexec}) i wczytanie danych z \texttt{config.txt}.
+    \item \texttt{make clean} -- przywrócenie środowiska do stanu pierwotnego (usunięcie pliku wykonywalnego oraz wygenerowanych grafik).
+\end{itemize}
+
+Program generuje plik wynikowy w bezstratnym formacie \texttt{mandelbrot.ppm}, który zapisuje matrycę bajtów reprezentującą kolory w standardzie RGB.
+
+\section{Schemat Blokowy (Logika Managera i Workera)}
+Poniższy schemat ilustruje cykl życia i komunikację pomiędzy procesem zarządcy a pracownikami w architekturze rozproszonej.
+
+\begin{center}
+\makebox[\textwidth][c]{ % Rozpoczęcie boxa centrowanego względem strony
+\begin{tikzpicture}[node distance=2cm]
+
+% Definicje stylów
+\tikzset{
+    process/.style={rectangle, minimum width=3cm, minimum height=1cm, text width=3.5cm, align=center, draw=black, fill=orange!30},
+    decision/.style={diamond, minimum width=3cm, minimum height=1cm, text width=2.2cm, align=center, draw=black, fill=green!30},
+    io/.style={trapezium, trapezium left angle=70, trapezium right angle=110, minimum width=3cm, minimum height=1cm, text width=3cm, align=center, draw=black, fill=blue!30},
+    arrow/.style={thick,->,>=stealth}
+}
+
+% --- MANAGER ---
+\node (m_start) [io] {Start Manager\\(Rank 0)};
+\node (m_init) [process, below=0.8cm of m_start] {Wczytaj config,\\wyślij zadania};
+\node (m_recv) [process, below=0.8cm of m_init] {Odbierz wiersz,\\aktualizuj UI};
+\node (m_dec) [decision, below=0.8cm of m_recv] {Są jeszcze\\wiersze?};
+\node (m_send_next) [process, left=0.6cm of m_dec] {Wyślij\\kolejny wiersz};
+\node (m_send_done) [process, below=0.8cm of m_dec] {Wyślij sygnał\\DONE};
+\node (m_end) [io, below=0.8cm of m_send_done] {Zapisz plik PPM.\\Stop.};
+
+% --- WORKER --- (Z większym marginesem od Managera)
+\node (w_start) [io, right=3.5cm of m_start] {Start Worker\\(Rank > 0)};
+\node (w_recv) [process, below=0.8cm of w_start] {Odbierz zadanie\\(wiersz lub DONE)};
+\node (w_dec) [decision, below=0.8cm of w_recv] {Sygnał\\DONE?};
+\node (w_calc) [process, below=0.8cm of w_dec] {Oblicz wiersz\\(OpenMP)};
+\node (w_send) [process, left=0.3cm of w_calc] {Odeślij wynik\\do Managera};
+\node (w_end) [io, right=0.6cm of w_dec] {Zakończ pracę.\\Stop.};
+
+% --- STRZAŁKI LOGIKI ---
+
+% Manager
+\draw [arrow] (m_start) -- (m_init);
+\draw [arrow] (m_init) -- (m_recv);
+\draw [arrow] (m_recv) -- (m_dec);
+\draw [arrow] (m_dec) -- node[anchor=south] {Tak} (m_send_next);
+\draw [arrow] (m_send_next) |- (m_recv);
+\draw [arrow] (m_dec) -- node[anchor=east] {Nie} (m_send_done);
+\draw [arrow] (m_send_done) -- (m_end);
+
+% Worker
+\draw [arrow] (w_start) -- (w_recv);
+\draw [arrow] (w_recv) -- (w_dec);
+\draw [arrow] (w_dec) -- node[anchor=south] {Tak} (w_end);
+\draw [arrow] (w_dec) -- node[anchor=east] {Nie} (w_calc);
+\draw [arrow] (w_calc) -- (w_send);
+\draw [arrow] (w_send) |- (w_recv);
+
+% --- KOMUNIKACJA MIĘDZY PROCESAMI ---
+\draw [arrow, dashed, red] (m_init) -- node[anchor=south] {Zadanie} (w_recv);
+\draw [arrow, dashed, red] (w_send) -- node[anchor=south, sloped] {Wynik} (m_recv);
+
+\end{tikzpicture}
+} % Zakończenie boxa
+\end{center}
+
+\end{document} 
