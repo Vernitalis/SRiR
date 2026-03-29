@@ -16,3 +16,13 @@ Realizacja projektu 45 pkt
     realizacja interfejsu użytkownika - 5 pkt,
     dokumentacja projektu (w tym kodu źródłowego) - 10 pkt,
     prezentacja działania projektu - 5 pkt.
+
+
+config.txt:
+- szerokość (px), 
+- wysokość (px), 
+- xmin​, 
+- xmax​, 
+- ymin​, 
+- ymax​, 
+- maksymalna liczba iteracji.
